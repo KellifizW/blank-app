@@ -5,10 +5,18 @@ import yfinance as yf
 import tensorflow as tf
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Conv1D, MaxPooling1D, Bidirectional, LSTM, Dense, Dropout, Layer, Input
-from tensorflow.keras.backend import tanh, dot, sigmoid, softmax, sum as K_sum
+from tensorflow.keras.backend import tanh, dot, softmax, sum as K_sum
 import matplotlib.pyplot as plt
+from matplotlib import font_manager
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+
+# 添加中文字型支持
+font_path = "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc"  # 假設環境中有此字型，若無需自行下載
+if font_path:
+    font_manager.fontManager.addfont(font_path)
+    plt.rcParams['font.family'] = 'Noto Sans CJK JP'
+plt.rcParams['axes.unicode_minus'] = False  # 解決負號顯示問題
 
 # 自訂 Attention 層
 class Attention(Layer):
@@ -40,14 +48,12 @@ class Attention(Layer):
 # 構建模型
 def build_model(input_shape):
     inputs = Input(shape=input_shape)
-    # 修改 1: kernel_size 從 1 改為 3
     x = Conv1D(filters=128, kernel_size=3, activation='relu', padding='same')(inputs)
-    # 修改 2: pool_size 從 1 改為 2
-    x = MaxPooling1D(pool_size=2)(x)
+    # 保留 MaxPooling1D，並將 pool_size 設為 1，保持序列長度不變
+    x = MaxPooling1D(pool_size=1)(x)
     x = Bidirectional(LSTM(units=128, activation='tanh', return_sequences=True))(x)
     x = Attention()(x)
-    # 維持原 Dropout 值 0.01
-    x = Dropout(0.01)(x)
+    x = Dropout(0.01)(x)  # 維持原 Dropout 值
     outputs = Dense(1)(x)
     model = tf.keras.Model(inputs=inputs, outputs=outputs)
     model.compile(optimizer='adam', loss='mse', metrics=['mae'])
@@ -110,7 +116,7 @@ def backtest(data, predictions, test_dates, initial_capital=100000):
     capital_values = [initial_capital] * test_start_idx
 
     for i in range(test_start_idx, len(data)):
-        close_price = float(data['Close'].iloc[i])
+        close_price = data['Close'].iloc[i].item()  # 修正 float 警告
         if data['MACD'].iloc[i] > data['Signal'].iloc[i] and data['MACD'].iloc[i - 1] <= data['Signal'].iloc[i - 1]:
             if position == 0:
                 shares = capital // close_price
@@ -138,7 +144,6 @@ def backtest(data, predictions, test_dates, initial_capital=100000):
 def main():
     st.title("股票價格預測與回測系統BETA(Backtesting Stage)")
     
-    # 添加說明文字
     st.markdown("""
     ### 程式功能與限制
     本程式使用深度學習模型（CNN-BiLSTM-Attention）預測股票價格，並基於 MACD 策略進行模擬交易回測。
@@ -147,52 +152,43 @@ def main():
     - **提示**：由於雲端環境限制，計算時間較長，請勿頻繁刷新頁面，耐心等待結果顯示。
     """)
     
-    # 用戶輸入股票代碼
     stock_symbol = st.text_input("請輸入股票代碼（例如 TSLA, AAPL, 以YahooFinance的Ticker為準）", value="TSLA")
-    timesteps = 60  # 固定參數
+    timesteps = 60
     
     if st.button("運行分析"):
-        with st.spinner("正在下載數據並訓練模型，請耐心等候 3-5 分鐘..."):
-            # 下載數據
+        with st.spinner("正在下載數據並訓練模型，請耐心等候 1-2 分鐘..."):
             data = yf.download(stock_symbol, start="2020-01-01", end="2022-12-31")
             if data.empty:
                 st.error("無法獲取該股票數據，請檢查股票代碼是否正確！")
                 return
 
-            # 數據預處理
             X_train, X_test, y_train, y_test, scaler_target, test_dates, full_data = preprocess_data(data, timesteps)
             
-            # 構建並訓練模型
             model = build_model(input_shape=(timesteps, X_train.shape[2]))
             history = model.fit(X_train, y_train, epochs=200, batch_size=256, validation_split=0.1, verbose=0)
             
-            # 預測
             predictions = predict_step(model, X_test)
             predictions = scaler_target.inverse_transform(predictions)
             y_test = scaler_target.inverse_transform(y_test)
             
-            # 回測
             capital_values, total_return, max_return, min_return, buy_signals, sell_signals = backtest(
                 full_data, predictions, test_dates)
             
-            # 顯示結果
             st.subheader(f"{stock_symbol} 分析結果")
             
-            # 繪製價格圖表（英文標籤）
             fig, ax = plt.subplots(figsize=(10, 6))
-            ax.plot(test_dates, y_test, label='Actual Price')
-            ax.plot(test_dates, predictions, label='Predicted Price')
+            ax.plot(test_dates, y_test, label='實際價格')
+            ax.plot(test_dates, predictions, label='預測價格')
             buy_x, buy_y = zip(*[(d, p) for d, p in buy_signals if d in test_dates])
             sell_x, sell_y = zip(*[(d, p) for d, p in sell_signals if d in test_dates])
-            ax.scatter(buy_x, buy_y, color='green', label='Buy Signal', marker='^', s=100)
-            ax.scatter(sell_x, sell_y, color='red', label='Sell Signal', marker='v', s=100)
-            ax.set_title(f'{stock_symbol} Actual vs Predicted Price (2022)')
-            ax.set_xlabel('Date')
-            ax.set_ylabel('Price')
+            ax.scatter(buy_x, buy_y, color='green', label='買入信號', marker='^', s=100)
+            ax.scatter(sell_x, sell_y, color='red', label='賣出信號', marker='v', s=100)
+            ax.set_title(f'{stock_symbol} 實際與預測價格 (2022)')
+            ax.set_xlabel('日期')
+            ax.set_ylabel('價格')
             ax.legend()
             st.pyplot(fig)
             
-            # 顯示回測結果（中文）
             st.subheader("回測結果")
             st.write(f"初始本金: $100,000")
             st.write(f"最終本金: ${capital_values[-1]:.2f}")
@@ -202,7 +198,6 @@ def main():
             st.write(f"買入次數: {len(buy_signals)}")
             st.write(f"賣出次數: {len(sell_signals)}")
             
-            # 顯示評估指標（中文）
             mae = mean_absolute_error(y_test, predictions)
             rmse = np.sqrt(mean_squared_error(y_test, predictions))
             r2 = r2_score(y_test, predictions)

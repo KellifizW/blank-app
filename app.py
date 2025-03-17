@@ -40,10 +40,13 @@ class Attention(Layer):
 # 構建模型
 def build_model(input_shape):
     inputs = Input(shape=input_shape)
-    x = Conv1D(filters=128, kernel_size=1, activation='relu')(inputs)
-    x = MaxPooling1D(pool_size=1)(x)
+    # 修改 1: kernel_size 從 1 改為 3
+    x = Conv1D(filters=128, kernel_size=3, activation='relu', padding='same')(inputs)
+    # 修改 2: pool_size 從 1 改為 2
+    x = MaxPooling1D(pool_size=2)(x)
     x = Bidirectional(LSTM(units=128, activation='tanh', return_sequences=True))(x)
     x = Attention()(x)
+    # 維持原 Dropout 值 0.01
     x = Dropout(0.01)(x)
     outputs = Dense(1)(x)
     model = tf.keras.Model(inputs=inputs, outputs=outputs)
@@ -149,7 +152,7 @@ def main():
     timesteps = 60  # 固定參數
     
     if st.button("運行分析"):
-        with st.spinner("正在下載數據並訓練模型，請耐心等候 1-2 分鐘..."):
+        with st.spinner("正在下載數據並訓練模型，請耐心等候 3-5 分鐘..."):
             # 下載數據
             data = yf.download(stock_symbol, start="2020-01-01", end="2022-12-31")
             if data.empty:

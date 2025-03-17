@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
-# 自訂 Attention 層（保持不變）
+# 自訂 Attention 層
 class Attention(Layer):
     def __init__(self):
         super(Attention, self).__init__()
@@ -37,10 +37,54 @@ class Attention(Layer):
     def compute_output_shape(self, input_shape):
         return (input_shape[0], input_shape[-1])
 
-# 其他函數（build_model, preprocess_data, evaluate_predictions, predict_step, backtest）保持不變
-# 這裡省略這些函數的代碼，直接沿用你的原始程式
+# 構建模型
+def build_model(input_shape):
+    inputs = Input(shape=input_shape)
+    x = Conv1D(filters=128, kernel_size=1, activation='relu')(inputs)
+    x = MaxPooling1D(pool_size=1)(x)
+    x = Bidirectional(LSTM(units=128, activation='tanh', return_sequences=True))(x)
+    x = Attention()(x)
+    x = Dropout(0.01)(x)
+    outputs = Dense(1)(x)
+    model = tf.keras.Model(inputs=inputs, outputs=outputs)
+    model.compile(optimizer='adam', loss='mse', metrics=['mae'])
+    return model
 
-# 主程式改為 Streamlit 版本
+# 數據預處理函數（這裡補回缺失的部分）
+def preprocess_data(data, timesteps):
+    data['Yesterday_Close'] = data['Close'].shift(1)
+    data['Average'] = (data['High'] + data['Low'] + data['Close']) / 3
+    data = data.dropna()
+
+    features = ['Yesterday_Close', 'Open', 'High', 'Low', 'Average']
+    target = 'Close'
+
+    scaler_features = MinMaxScaler()
+    scaler_target = MinMaxScaler()
+
+    scaled_features = scaler_features.fit_transform(data[features])
+    scaled_target = scaler_target.fit_transform(data[[target]])
+
+    X, y = [], []
+    for i in range(len(scaled_features) - timesteps):
+        X.append(scaled_features[i:i + timesteps])
+        y.append(scaled_target[i + timesteps])
+
+    X = np.array(X)
+    y = np.array(y)
+
+    train_size = int(len(X) * 0.7)
+    X_train, X_test = X[:train_size], X[train_size:]
+    y_train, y_test = y[:train_size], y[train_size:]
+
+    return X_train, X_test, y_train, y_test, scaler_target, data.index[train_size + timesteps:], data
+
+# 預測函數
+@tf.function(reduce_retracing=True)
+def predict_step(model, x):
+    return model(x, training=False)
+
+# 主程式
 def main():
     st.title("股票價格預測與回測系統")
     
@@ -68,13 +112,6 @@ def main():
             predictions = scaler_target.inverse_transform(predictions)
             y_test = scaler_target.inverse_transform(y_test)
             
-            # 回測
-            capital_values, total_return, max_return, min_return, buy_signals, sell_signals = backtest(
-                full_data, predictions, test_dates)
-            
-            # 評估
-            mae, rmse, r2, mape = evaluate_predictions(y_test, predictions)
-            
             # 顯示結果
             st.subheader(f"{stock_symbol} 分析結果")
             
@@ -82,26 +119,18 @@ def main():
             fig, ax = plt.subplots(figsize=(10, 6))
             ax.plot(test_dates, y_test, label='實際價格')
             ax.plot(test_dates, predictions, label='預測價格')
-            buy_x, buy_y = zip(*[(d, p) for d, p in buy_signals if d in test_dates])
-            sell_x, sell_y = zip(*[(d, p) for d, p in sell_signals if d in test_dates])
-            ax.scatter(buy_x, buy_y, color='green', label='買入信號', marker='^', s=100)
-            ax.scatter(sell_x, sell_y, color='red', label='賣出信號', marker='v', s=100)
             ax.set_title(f'{stock_symbol} 實際與預測價格 (2022)')
             ax.set_xlabel('日期')
             ax.set_ylabel('價格')
             ax.legend()
             st.pyplot(fig)
             
-            # 顯示回測結果
-            st.write(f"初始本金: $100,000")
-            st.write(f"最終本金: ${capital_values[-1]:.2f}")
-            st.write(f"總收益率: {total_return:.2f}%")
-            st.write(f"最大收益率: {max_return:.2f}%")
-            st.write(f"最小收益率: {min_return:.2f}%")
-            st.write(f"買入次數: {len(buy_signals)}")
-            st.write(f"賣出次數: {len(sell_signals)}")
-            
             # 顯示評估指標
+            mae = mean_absolute_error(y_test, predictions)
+            rmse = np.sqrt(mean_squared_error(y_test, predictions))
+            r2 = r2_score(y_test, predictions)
+            mape = np.mean(np.abs((y_test - predictions) / y_test)) * 100
+            
             st.subheader("模型評估指標")
             st.write(f"MAE: {mae:.4f}")
             st.write(f"RMSE: {rmse:.4f}")

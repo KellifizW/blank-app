@@ -145,7 +145,7 @@ def main():
     """)
     
     # 用戶輸入股票代碼
-    stock_symbol = st.text_input("請輸入股票代碼（例如 TSLA, AAPL）", value="TSLA")
+    stock_symbol = st.text_input("請輸入股票代碼（例如 TSLA, AAPL, 以YahooFinance的Ticker為準）", value="TSLA")
     timesteps = 60  # 固定參數
     
     if st.button("運行分析"):

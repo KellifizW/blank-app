@@ -133,7 +133,7 @@ def backtest(data, predictions, test_dates, initial_capital=100000):
 
 # 主程式
 def main():
-    st.title("股票價格預測與回測系統")
+    st.title("股票價格預測與回測系統beta(backtesting stage)")
     
     # 用戶輸入股票代碼
     stock_symbol = st.text_input("請輸入股票代碼（例如 TSLA, AAPL）", value="TSLA")

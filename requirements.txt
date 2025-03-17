@@ -1,7 +1,7 @@
-streamlit
-numpy
-pandas
-yfinance
-tensorflow
-matplotlib
-scikit-learn
+streamlit==1.43.2
+numpy==2.1.3
+pandas==2.2.3
+yfinance==0.2.54
+tensorflow==2.15.0  # 明確指定 2.15.0
+matplotlib==3.10.1
+scikit-learn==1.6.1

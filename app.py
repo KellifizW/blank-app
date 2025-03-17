@@ -50,7 +50,7 @@ def build_model(input_shape):
     model.compile(optimizer='adam', loss='mse', metrics=['mae'])
     return model
 
-# 數據預處理函數（這裡補回缺失的部分）
+# 數據預處理
 def preprocess_data(data, timesteps):
     data['Yesterday_Close'] = data['Close'].shift(1)
     data['Average'] = (data['High'] + data['Low'] + data['Close']) / 3
@@ -84,6 +84,53 @@ def preprocess_data(data, timesteps):
 def predict_step(model, x):
     return model(x, training=False)
 
+# 回測與交易策略
+def backtest(data, predictions, test_dates, initial_capital=100000):
+    data = data.copy()
+    test_size = len(predictions)
+    data['Predicted'] = np.nan
+    data.iloc[-test_size:, data.columns.get_loc('Predicted')] = predictions.flatten()
+
+    data['EMA12'] = data['Close'].ewm(span=12, adjust=False).mean()
+    data['EMA26'] = data['Close'].ewm(span=26, adjust=False).mean()
+    data['MACD'] = data['EMA12'] - data['EMA26']
+    data['Signal'] = data['MACD'].ewm(span=9, adjust=False).mean()
+
+    position = 0
+    capital = initial_capital
+    shares = 0
+    capital_values = []
+    buy_signals = []
+    sell_signals = []
+
+    test_start_idx = data.index.get_loc(test_dates[0])
+    capital_values = [initial_capital] * test_start_idx
+
+    for i in range(test_start_idx, len(data)):
+        close_price = float(data['Close'].iloc[i])
+        if data['MACD'].iloc[i] > data['Signal'].iloc[i] and data['MACD'].iloc[i - 1] <= data['Signal'].iloc[i - 1]:
+            if position == 0:
+                shares = capital // close_price
+                capital -= shares * close_price
+                position = 1
+                buy_signals.append((data.index[i], close_price))
+        elif data['MACD'].iloc[i] < data['Signal'].iloc[i] and data['MACD'].iloc[i - 1] >= data['Signal'].iloc[i - 1]:
+            if position == 1:
+                capital += shares * close_price
+                position = 0
+                shares = 0
+                sell_signals.append((data.index[i], close_price))
+
+        total_value = capital + (shares * close_price if position > 0 else 0)
+        capital_values.append(total_value)
+
+    capital_values = np.array(capital_values)
+    total_return = (capital_values[-1] / capital_values[0] - 1) * 100
+    max_return = (max(capital_values) / capital_values[0] - 1) * 100
+    min_return = (min(capital_values) / capital_values[0] - 1) * 100
+
+    return capital_values, total_return, max_return, min_return, buy_signals, sell_signals
+
 # 主程式
 def main():
     st.title("股票價格預測與回測系統")
@@ -112,18 +159,40 @@ def main():
             predictions = scaler_target.inverse_transform(predictions)
             y_test = scaler_target.inverse_transform(y_test)
             
+            # 回測
+            capital_values, total_return, max_return, min_return, buy_signals, sell_signals = backtest(
+                full_data, predictions, test_dates)
+            
             # 顯示結果
             st.subheader(f"{stock_symbol} 分析結果")
+            
+            # 設置中文字體
+            plt.rcParams['font.family'] = 'Noto Sans CJK JP'  # 使用 Noto Sans CJK 支援中文
+            plt.rcParams['axes.unicode_minus'] = False  # 解決負號顯示問題
             
             # 繪製價格圖表
             fig, ax = plt.subplots(figsize=(10, 6))
             ax.plot(test_dates, y_test, label='實際價格')
             ax.plot(test_dates, predictions, label='預測價格')
+            buy_x, buy_y = zip(*[(d, p) for d, p in buy_signals if d in test_dates])
+            sell_x, sell_y = zip(*[(d, p) for d, p in sell_signals if d in test_dates])
+            ax.scatter(buy_x, buy_y, color='green', label='買入信號', marker='^', s=100)
+            ax.scatter(sell_x, sell_y, color='red', label='賣出信號', marker='v', s=100)
             ax.set_title(f'{stock_symbol} 實際與預測價格 (2022)')
             ax.set_xlabel('日期')
             ax.set_ylabel('價格')
             ax.legend()
             st.pyplot(fig)
+            
+            # 顯示回測結果
+            st.subheader("回測結果")
+            st.write(f"初始本金: $100,000")
+            st.write(f"最終本金: ${capital_values[-1]:.2f}")
+            st.write(f"總收益率: {total_return:.2f}%")
+            st.write(f"最大收益率: {max_return:.2f}%")
+            st.write(f"最小收益率: {min_return:.2f}%")
+            st.write(f"買入次數: {len(buy_signals)}")
+            st.write(f"賣出次數: {len(sell_signals)}")
             
             # 顯示評估指標
             mae = mean_absolute_error(y_test, predictions)

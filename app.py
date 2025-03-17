@@ -5,33 +5,35 @@ import yfinance as yf
 import tensorflow as tf
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Conv1D, MaxPooling1D, Bidirectional, LSTM, Dense, Dropout, Layer, Input
-from tensorflow.keras.backend import tanh, dot, softmax, sum as K_sum
+from tensorflow.keras import backend as K
 import matplotlib.pyplot as plt
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
-# 自訂 Attention 層
+# 自訂 Attention 層（適配 TensorFlow 2.19.0）
 class Attention(Layer):
-    def __init__(self):
-        super(Attention, self).__init__()
+    def __init__(self, **kwargs):
+        super(Attention, self).__init__(**kwargs)
 
     def build(self, input_shape):
-        self.W_h = self.add_weight(name='attention_W_h', shape=(input_shape[-1], input_shape[-1]),
-                                   initializer='random_normal', trainable=True)
-        self.W_a = self.add_weight(name='attention_W_a', shape=(input_shape[-1], 1),
-                                   initializer='random_normal', trainable=True)
-        self.b_h = self.add_weight(name='attention_b_h', shape=(input_shape[-1], 1),
-                                   initializer='zeros', trainable=True)
+        self.W = self.add_weight(name='attention_weight', 
+                                 shape=(input_shape[-1], 1),
+                                 initializer='random_normal',
+                                 trainable=True)
+        self.b = self.add_weight(name='attention_bias',
+                                 shape=(input_shape[1], 1),
+                                 initializer='zeros',
+                                 trainable=True)
         super(Attention, self).build(input_shape)
 
     def call(self, inputs):
-        intermediate = tanh(dot(inputs, self.W_h) + self.b_h)
-        e = dot(intermediate, self.W_a)
-        e = tf.squeeze(e, axis=-1)
-        alpha = softmax(e, axis=1)
-        alpha = tf.expand_dims(alpha, axis=-1)
+        # 計算注意力權重
+        e = K.tanh(K.dot(inputs, self.W) + self.b)
+        e = K.squeeze(e, axis=-1)
+        alpha = K.softmax(e)
+        alpha = K.expand_dims(alpha, axis=-1)
         context = inputs * alpha
-        output = K_sum(context, axis=1)
+        output = K.sum(context, axis=1)
         return output
 
     def compute_output_shape(self, input_shape):
@@ -41,7 +43,7 @@ class Attention(Layer):
 def build_model(input_shape):
     inputs = Input(shape=input_shape)
     x = Conv1D(filters=128, kernel_size=3, activation='relu', padding='same')(inputs)
-    x = MaxPooling1D(pool_size=1)(x)  # 保留 MaxPooling1D，pool_size=1 不改變序列長度
+    x = MaxPooling1D(pool_size=1)(x)  # pool_size=1 不改變序列長度
     x = Bidirectional(LSTM(units=128, activation='tanh', return_sequences=True))(x)
     x = Attention()(x)
     x = Dropout(0.01)(x)
@@ -133,24 +135,24 @@ def backtest(data, predictions, test_dates, initial_capital=100000):
 
 # 主程式
 def main():
-    st.title("股票價格預測與回測系統BETA(Backtesting Stage)")
+    st.title("Stock Price Prediction and Backtesting System BETA")
     
     st.markdown("""
-    ### 程式功能與限制
-    本程式使用深度學習模型（CNN-BiLSTM-Attention）預測股票價格，並基於 MACD 策略進行模擬交易回測。
-    - **功能**：輸入股票代碼後，程式將下載 2020-2022 年的歷史數據，預測未來價格並顯示回測結果。
-    - **限制**：預測結果僅供參考，不構成投資建議。模型訓練需大量計算，可能需要 3-5 分鐘，請耐心等候。
-    - **提示**：由於雲端環境限制，計算時間較長，請勿頻繁刷新頁面，耐心等待結果顯示。
+    ### Features and Limitations
+    This program uses a deep learning model (CNN-BiLSTM-Attention) to predict stock prices and performs simulated trading backtesting based on the MACD strategy.
+    - **Features**: Enter a stock ticker to download historical data from 2020-2022, predict future prices, and view backtest results.
+    - **Limitations**: Predictions are for reference only and do not constitute investment advice. Model training requires significant computation and may take 3-5 minutes.
+    - **Note**: Due to cloud environment constraints, computation may take longer. Please avoid frequent page refreshes and wait for results.
     """)
     
-    stock_symbol = st.text_input("請輸入股票代碼（例如 TSLA, AAPL, 以YahooFinance的Ticker為準）", value="TSLA")
+    stock_symbol = st.text_input("Enter stock ticker (e.g., TSLA, AAPL, per Yahoo Finance)", value="TSLA")
     timesteps = 60
     
-    if st.button("運行分析"):
-        with st.spinner("正在下載數據並訓練模型，請耐心等候 1-2 分鐘..."):
+    if st.button("Run Analysis"):
+        with st.spinner("Downloading data and training model, please wait 1-2 minutes..."):
             data = yf.download(stock_symbol, start="2020-01-01", end="2022-12-31")
             if data.empty:
-                st.error("無法獲取該股票數據，請檢查股票代碼是否正確！")
+                st.error("Unable to fetch data for this ticker. Please check the ticker symbol!")
                 return
 
             X_train, X_test, y_train, y_test, scaler_target, test_dates, full_data = preprocess_data(data, timesteps)
@@ -165,7 +167,7 @@ def main():
             capital_values, total_return, max_return, min_return, buy_signals, sell_signals = backtest(
                 full_data, predictions, test_dates)
             
-            st.subheader(f"{stock_symbol} 分析結果")
+            st.subheader(f"{stock_symbol} Analysis Results")
             
             fig, ax = plt.subplots(figsize=(10, 6))
             ax.plot(test_dates, y_test, label='Actual Price')
@@ -180,21 +182,21 @@ def main():
             ax.legend()
             st.pyplot(fig)
             
-            st.subheader("回測結果")
-            st.write(f"初始本金: $100,000")
-            st.write(f"最終本金: ${capital_values[-1]:.2f}")
-            st.write(f"總收益率: {total_return:.2f}%")
-            st.write(f"最大收益率: {max_return:.2f}%")
-            st.write(f"最小收益率: {min_return:.2f}%")
-            st.write(f"買入次數: {len(buy_signals)}")
-            st.write(f"賣出次數: {len(sell_signals)}")
+            st.subheader("Backtest Results")
+            st.write(f"Initial Capital: $100,000")
+            st.write(f"Final Capital: ${capital_values[-1]:.2f}")
+            st.write(f"Total Return: {total_return:.2f}%")
+            st.write(f"Max Return: {max_return:.2f}%")
+            st.write(f"Min Return: {min_return:.2f}%")
+            st.write(f"Buy Trades: {len(buy_signals)}")
+            st.write(f"Sell Trades: {len(sell_signals)}")
             
             mae = mean_absolute_error(y_test, predictions)
             rmse = np.sqrt(mean_squared_error(y_test, predictions))
             r2 = r2_score(y_test, predictions)
             mape = np.mean(np.abs((y_test - predictions) / y_test)) * 100
             
-            st.subheader("模型評估指標")
+            st.subheader("Model Evaluation Metrics")
             st.write(f"MAE: {mae:.4f}")
             st.write(f"RMSE: {rmse:.4f}")
             st.write(f"R²: {r2:.4f}")

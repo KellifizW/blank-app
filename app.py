@@ -7,20 +7,8 @@ from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Conv1D, MaxPooling1D, Bidirectional, LSTM, Dense, Dropout, Layer, Input
 from tensorflow.keras.backend import tanh, dot, softmax, sum as K_sum
 import matplotlib.pyplot as plt
-from matplotlib import font_manager
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
-
-# 字型處理：檢查環境中可用的字型，避免 FileNotFoundError
-try:
-    font_path = "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc"
-    font_manager.fontManager.addfont(font_path)
-    plt.rcParams['font.family'] = 'Noto Sans CJK JP'
-except FileNotFoundError:
-    # 若字型不存在，使用預設字型並提示
-    st.warning("中文字型未找到，圖表可能無法顯示中文。請在本地環境測試或上傳字型檔案。")
-    plt.rcParams['font.family'] = 'DejaVu Sans'
-plt.rcParams['axes.unicode_minus'] = False  # 解決負號顯示問題
 
 # 自訂 Attention 層
 class Attention(Layer):
@@ -119,7 +107,7 @@ def backtest(data, predictions, test_dates, initial_capital=100000):
     capital_values = [initial_capital] * test_start_idx
 
     for i in range(test_start_idx, len(data)):
-        close_price = data['Close'].iloc[i].item()  # 修正 float 警告
+        close_price = data['Close'].iloc[i].item()  # 使用 .item() 避免 FutureWarning
         if data['MACD'].iloc[i] > data['Signal'].iloc[i] and data['MACD'].iloc[i - 1] <= data['Signal'].iloc[i - 1]:
             if position == 0:
                 shares = capital // close_price
@@ -180,15 +168,15 @@ def main():
             st.subheader(f"{stock_symbol} 分析結果")
             
             fig, ax = plt.subplots(figsize=(10, 6))
-            ax.plot(test_dates, y_test, label='實際價格')
-            ax.plot(test_dates, predictions, label='預測價格')
+            ax.plot(test_dates, y_test, label='Actual Price')
+            ax.plot(test_dates, predictions, label='Predicted Price')
             buy_x, buy_y = zip(*[(d, p) for d, p in buy_signals if d in test_dates])
             sell_x, sell_y = zip(*[(d, p) for d, p in sell_signals if d in test_dates])
-            ax.scatter(buy_x, buy_y, color='green', label='買入信號', marker='^', s=100)
-            ax.scatter(sell_x, sell_y, color='red', label='賣出信號', marker='v', s=100)
-            ax.set_title(f'{stock_symbol} 實際與預測價格 (2022)')
-            ax.set_xlabel('日期')
-            ax.set_ylabel('價格')
+            ax.scatter(buy_x, buy_y, color='green', label='Buy Signal', marker='^', s=100)
+            ax.scatter(sell_x, sell_y, color='red', label='Sell Signal', marker='v', s=100)
+            ax.set_title(f'{stock_symbol} Actual vs Predicted Prices (2022)')
+            ax.set_xlabel('Date')
+            ax.set_ylabel('Price')
             ax.legend()
             st.pyplot(fig)
             

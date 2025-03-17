@@ -9,6 +9,7 @@ from tensorflow.keras import backend as K
 import matplotlib.pyplot as plt
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+import time  # 新增時間模組
 
 # 自訂 Attention 層（適配 TensorFlow 2.19.0）
 class Attention(Layer):
@@ -27,7 +28,6 @@ class Attention(Layer):
         super(Attention, self).build(input_shape)
 
     def call(self, inputs):
-        # 計算注意力權重
         e = K.tanh(K.dot(inputs, self.W) + self.b)
         e = K.squeeze(e, axis=-1)
         alpha = K.softmax(e)
@@ -43,7 +43,7 @@ class Attention(Layer):
 def build_model(input_shape):
     inputs = Input(shape=input_shape)
     x = Conv1D(filters=128, kernel_size=3, activation='relu', padding='same')(inputs)
-    x = MaxPooling1D(pool_size=1)(x)  # pool_size=1 不改變序列長度
+    x = MaxPooling1D(pool_size=1)(x)
     x = Bidirectional(LSTM(units=128, activation='tanh', return_sequences=True))(x)
     x = Attention()(x)
     x = Dropout(0.01)(x)
@@ -109,7 +109,7 @@ def backtest(data, predictions, test_dates, initial_capital=100000):
     capital_values = [initial_capital] * test_start_idx
 
     for i in range(test_start_idx, len(data)):
-        close_price = data['Close'].iloc[i].item()  # 使用 .item() 避免 FutureWarning
+        close_price = data['Close'].iloc[i].item()
         if data['MACD'].iloc[i] > data['Signal'].iloc[i] and data['MACD'].iloc[i - 1] <= data['Signal'].iloc[i - 1]:
             if position == 0:
                 shares = capital // close_price
@@ -149,58 +149,86 @@ def main():
     timesteps = 60
     
     if st.button("運行分析"):
-        with st.spinner("正在下載數據並訓練模型，請等待1-2分鐘..."):
+        start_time = time.time()  # 記錄開始時間
+        
+        with st.spinner("正在下載數據並訓練模型，請等待..."):
+            # 下載數據
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+            status_text.text("步驟 1/5: 下載數據...")
             data = yf.download(stock_symbol, start="2020-01-01", end="2022-12-31")
             if data.empty:
                 st.error("無法獲取此代碼的數據。請檢查股票代碼！")
                 return
+            progress_bar.progress(20)
 
+            # 預處理數據
+            status_text.text("步驟 2/5: 預處理數據...")
             X_train, X_test, y_train, y_test, scaler_target, test_dates, full_data = preprocess_data(data, timesteps)
-            
+            progress_bar.progress(40)
+
+            # 構建並訓練模型
+            status_text.text("步驟 3/5: 訓練模型（這可能需要幾分鐘）...")
             model = build_model(input_shape=(timesteps, X_train.shape[2]))
             history = model.fit(X_train, y_train, epochs=200, batch_size=256, validation_split=0.1, verbose=0)
-            
+            progress_bar.progress(60)
+
+            # 進行預測
+            status_text.text("步驟 4/5: 進行價格預測...")
             predictions = predict_step(model, X_test)
             predictions = scaler_target.inverse_transform(predictions)
             y_test = scaler_target.inverse_transform(y_test)
-            
+            progress_bar.progress(80)
+
+            # 回測
+            status_text.text("步驟 5/5: 執行回測...")
             capital_values, total_return, max_return, min_return, buy_signals, sell_signals = backtest(
                 full_data, predictions, test_dates)
-            
-            st.subheader(f"{stock_symbol} 分析結果")
-            
-            fig, ax = plt.subplots(figsize=(10, 6))
-            ax.plot(test_dates, y_test, label='Actual Price')
-            ax.plot(test_dates, predictions, label='Predicted Price')
-            buy_x, buy_y = zip(*[(d, p) for d, p in buy_signals if d in test_dates])
-            sell_x, sell_y = zip(*[(d, p) for d, p in sell_signals if d in test_dates])
-            ax.scatter(buy_x, buy_y, color='green', label='Buy Signal', marker='^', s=100)
-            ax.scatter(sell_x, sell_y, color='red', label='Sell Signal', marker='v', s=100)
-            ax.set_title(f'{stock_symbol} Actual vs Predicted Prices (2022)')
-            ax.set_xlabel('Date')
-            ax.set_ylabel('Price')
-            ax.legend()
-            st.pyplot(fig)
-            
-            st.subheader("回測結果")
-            st.write(f"初始資金: $100,000")
-            st.write(f"最終資金: ${capital_values[-1]:.2f}")
-            st.write(f"總回報率: {total_return:.2f}%")
-            st.write(f"最大回報率: {max_return:.2f}%")
-            st.write(f"最小回報率: {min_return:.2f}%")
-            st.write(f"買入交易次數: {len(buy_signals)}")
-            st.write(f"賣出交易次數: {len(sell_signals)}")
-            
-            mae = mean_absolute_error(y_test, predictions)
-            rmse = np.sqrt(mean_squared_error(y_test, predictions))
-            r2 = r2_score(y_test, predictions)
-            mape = np.mean(np.abs((y_test - predictions) / y_test)) * 100
-            
-            st.subheader("模型評估指標")
-            st.write(f"平均絕對誤差 (MAE): {mae:.4f}")
-            st.write(f"均方根誤差 (RMSE): {rmse:.4f}")
-            st.write(f"決定係數 (R²): {r2:.4f}")
-            st.write(f"平均絕對百分比誤差 (MAPE): {mape:.2f}%")
+            progress_bar.progress(100)
+            status_text.text("完成！正在生成結果...")
+
+        # 計算運行時間
+        end_time = time.time()
+        elapsed_time = end_time - start_time
+        
+        st.subheader(f"{stock_symbol} 分析結果")
+        
+        fig, ax = plt.subplots(figsize=(10, 6))
+        ax.plot(test_dates, y_test, label='Actual Price')
+        ax.plot(test_dates, predictions, label='Predicted Price')
+        buy_x, buy_y = zip(*[(d, p) for d, p in buy_signals if d in test_dates])
+        sell_x, sell_y = zip(*[(d, p) for d, p in sell_signals if d in test_dates])
+        ax.scatter(buy_x, buy_y, color='green', label='Buy Signal', marker='^', s=100)
+        ax.scatter(sell_x, sell_y, color='red', label='Sell Signal', marker='v', s=100)
+        ax.set_title(f'{stock_symbol} Actual vs Predicted Prices (2022)')
+        ax.set_xlabel('Date')
+        ax.set_ylabel('Price')
+        ax.legend()
+        st.pyplot(fig)
+        
+        st.subheader("回測結果")
+        st.write(f"初始資金: $100,000")
+        st.write(f"最終資金: ${capital_values[-1]:.2f}")
+        st.write(f"總回報率: {total_return:.2f}%")
+        st.write(f"最大回報率: {max_return:.2f}%")
+        st.write(f"最小回報率: {min_return:.2f}%")
+        st.write(f"買入交易次數: {len(buy_signals)}")
+        st.write(f"賣出交易次數: {len(sell_signals)}")
+        
+        mae = mean_absolute_error(y_test, predictions)
+        rmse = np.sqrt(mean_squared_error(y_test, predictions))
+        r2 = r2_score(y_test, predictions)
+        mape = np.mean(np.abs((y_test - predictions) / y_test)) * 100
+        
+        st.subheader("模型評估指標")
+        st.write(f"平均絕對誤差 (MAE): {mae:.4f}")
+        st.write(f"均方根誤差 (RMSE): {rmse:.4f}")
+        st.write(f"決定係數 (R²): {r2:.4f}")
+        st.write(f"平均絕對百分比誤差 (MAPE): {mape:.2f}%")
+        
+        # 顯示運行時間
+        st.subheader("運行時間")
+        st.write(f"總耗時: {elapsed_time:.2f} 秒")
 
 if __name__ == "__main__":
     main()

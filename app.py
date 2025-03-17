@@ -11,11 +11,15 @@ from matplotlib import font_manager
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
-# 添加中文字型支持
-font_path = "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc"  # 假設環境中有此字型，若無需自行下載
-if font_path:
+# 字型處理：檢查環境中可用的字型，避免 FileNotFoundError
+try:
+    font_path = "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc"
     font_manager.fontManager.addfont(font_path)
     plt.rcParams['font.family'] = 'Noto Sans CJK JP'
+except FileNotFoundError:
+    # 若字型不存在，使用預設字型並提示
+    st.warning("中文字型未找到，圖表可能無法顯示中文。請在本地環境測試或上傳字型檔案。")
+    plt.rcParams['font.family'] = 'DejaVu Sans'
 plt.rcParams['axes.unicode_minus'] = False  # 解決負號顯示問題
 
 # 自訂 Attention 層
@@ -49,11 +53,10 @@ class Attention(Layer):
 def build_model(input_shape):
     inputs = Input(shape=input_shape)
     x = Conv1D(filters=128, kernel_size=3, activation='relu', padding='same')(inputs)
-    # 保留 MaxPooling1D，並將 pool_size 設為 1，保持序列長度不變
-    x = MaxPooling1D(pool_size=1)(x)
+    x = MaxPooling1D(pool_size=1)(x)  # 保留 MaxPooling1D，pool_size=1 不改變序列長度
     x = Bidirectional(LSTM(units=128, activation='tanh', return_sequences=True))(x)
     x = Attention()(x)
-    x = Dropout(0.01)(x)  # 維持原 Dropout 值
+    x = Dropout(0.01)(x)
     outputs = Dense(1)(x)
     model = tf.keras.Model(inputs=inputs, outputs=outputs)
     model.compile(optimizer='adam', loss='mse', metrics=['mae'])

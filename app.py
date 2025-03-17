@@ -133,14 +133,23 @@ def backtest(data, predictions, test_dates, initial_capital=100000):
 
 # 主程式
 def main():
-    st.title("股票價格預測與回測系統beta(backtesting stage)")
+    st.title("股票價格預測與回測系統BETA(Backtesting Stage)")
+    
+    # 添加說明文字
+    st.markdown("""
+    ### 程式功能與限制
+    本程式使用深度學習模型（CNN-BiLSTM-Attention）預測股票價格，並基於 MACD 策略進行模擬交易回測。
+    - **功能**：輸入股票代碼後，程式將下載 2020-2022 年的歷史數據，預測未來價格並顯示回測結果。
+    - **限制**：預測結果僅供參考，不構成投資建議。模型訓練需大量計算，可能需要 1-2 分鐘，請耐心等候。
+    - **提示**：由於雲端環境限制，計算時間較長，請勿頻繁刷新頁面，耐心等待結果顯示。
+    """)
     
     # 用戶輸入股票代碼
     stock_symbol = st.text_input("請輸入股票代碼（例如 TSLA, AAPL）", value="TSLA")
     timesteps = 60  # 固定參數
     
     if st.button("運行分析"):
-        with st.spinner("正在下載數據並訓練模型..."):
+        with st.spinner("正在下載數據並訓練模型，請耐心等候 1-2 分鐘..."):
             # 下載數據
             data = yf.download(stock_symbol, start="2020-01-01", end="2022-12-31")
             if data.empty:
@@ -166,25 +175,21 @@ def main():
             # 顯示結果
             st.subheader(f"{stock_symbol} 分析結果")
             
-            # 設置中文字體
-            plt.rcParams['font.family'] = 'Noto Sans CJK JP'  # 使用 Noto Sans CJK 支援中文
-            plt.rcParams['axes.unicode_minus'] = False  # 解決負號顯示問題
-            
-            # 繪製價格圖表
+            # 繪製價格圖表（英文標籤）
             fig, ax = plt.subplots(figsize=(10, 6))
-            ax.plot(test_dates, y_test, label='實際價格')
-            ax.plot(test_dates, predictions, label='預測價格')
+            ax.plot(test_dates, y_test, label='Actual Price')
+            ax.plot(test_dates, predictions, label='Predicted Price')
             buy_x, buy_y = zip(*[(d, p) for d, p in buy_signals if d in test_dates])
             sell_x, sell_y = zip(*[(d, p) for d, p in sell_signals if d in test_dates])
-            ax.scatter(buy_x, buy_y, color='green', label='買入信號', marker='^', s=100)
-            ax.scatter(sell_x, sell_y, color='red', label='賣出信號', marker='v', s=100)
-            ax.set_title(f'{stock_symbol} 實際與預測價格 (2022)')
-            ax.set_xlabel('日期')
-            ax.set_ylabel('價格')
+            ax.scatter(buy_x, buy_y, color='green', label='Buy Signal', marker='^', s=100)
+            ax.scatter(sell_x, sell_y, color='red', label='Sell Signal', marker='v', s=100)
+            ax.set_title(f'{stock_symbol} Actual vs Predicted Price (2022)')
+            ax.set_xlabel('Date')
+            ax.set_ylabel('Price')
             ax.legend()
             st.pyplot(fig)
             
-            # 顯示回測結果
+            # 顯示回測結果（中文）
             st.subheader("回測結果")
             st.write(f"初始本金: $100,000")
             st.write(f"最終本金: ${capital_values[-1]:.2f}")
@@ -194,7 +199,7 @@ def main():
             st.write(f"買入次數: {len(buy_signals)}")
             st.write(f"賣出次數: {len(sell_signals)}")
             
-            # 顯示評估指標
+            # 顯示評估指標（中文）
             mae = mean_absolute_error(y_test, predictions)
             rmse = np.sqrt(mean_squared_error(y_test, predictions))
             r2 = r2_score(y_test, predictions)

@@ -135,24 +135,24 @@ def backtest(data, predictions, test_dates, initial_capital=100000):
 
 # 主程式
 def main():
-    st.title("Stock Price Prediction and Backtesting System BETA")
+    st.title("股票價格預測與回測系統 BETA")
     
     st.markdown("""
-    ### Features and Limitations
-    This program uses a deep learning model (CNN-BiLSTM-Attention) to predict stock prices and performs simulated trading backtesting based on the MACD strategy.
-    - **Features**: Enter a stock ticker to download historical data from 2020-2022, predict future prices, and view backtest results.
-    - **Limitations**: Predictions are for reference only and do not constitute investment advice. Model training requires significant computation and may take 3-5 minutes.
-    - **Note**: Due to cloud environment constraints, computation may take longer. Please avoid frequent page refreshes and wait for results.
+    ### 功能與限制
+    本程式使用深度學習模型（CNN-BiLSTM-Attention）預測股票價格，並基於MACD策略進行模擬交易回測。
+    - **功能**：輸入股票代碼以下載2020-2022年的歷史數據，預測未來價格並查看回測結果。
+    - **限制**：預測結果僅供參考，不構成投資建議。模型訓練需要大量計算，可能需要3-5分鐘。
+    - **注意**：由於雲端環境限制，計算可能需要更長時間。請避免頻繁刷新頁面，並耐心等待結果。
     """)
     
-    stock_symbol = st.text_input("Enter stock ticker (e.g., TSLA, AAPL, per Yahoo Finance)", value="TSLA")
+    stock_symbol = st.text_input("輸入股票代碼（例如：TSLA, AAPL，依據Yahoo Finance）", value="TSLA")
     timesteps = 60
     
-    if st.button("Run Analysis"):
-        with st.spinner("Downloading data and training model, please wait 1-2 minutes..."):
+    if st.button("運行分析"):
+        with st.spinner("正在下載數據並訓練模型，請等待1-2分鐘..."):
             data = yf.download(stock_symbol, start="2020-01-01", end="2022-12-31")
             if data.empty:
-                st.error("Unable to fetch data for this ticker. Please check the ticker symbol!")
+                st.error("無法獲取此代碼的數據。請檢查股票代碼！")
                 return
 
             X_train, X_test, y_train, y_test, scaler_target, test_dates, full_data = preprocess_data(data, timesteps)
@@ -167,7 +167,7 @@ def main():
             capital_values, total_return, max_return, min_return, buy_signals, sell_signals = backtest(
                 full_data, predictions, test_dates)
             
-            st.subheader(f"{stock_symbol} Analysis Results")
+            st.subheader(f"{stock_symbol} 分析結果")
             
             fig, ax = plt.subplots(figsize=(10, 6))
             ax.plot(test_dates, y_test, label='Actual Price')
@@ -182,25 +182,25 @@ def main():
             ax.legend()
             st.pyplot(fig)
             
-            st.subheader("Backtest Results")
-            st.write(f"Initial Capital: $100,000")
-            st.write(f"Final Capital: ${capital_values[-1]:.2f}")
-            st.write(f"Total Return: {total_return:.2f}%")
-            st.write(f"Max Return: {max_return:.2f}%")
-            st.write(f"Min Return: {min_return:.2f}%")
-            st.write(f"Buy Trades: {len(buy_signals)}")
-            st.write(f"Sell Trades: {len(sell_signals)}")
+            st.subheader("回測結果")
+            st.write(f"初始資金: $100,000")
+            st.write(f"最終資金: ${capital_values[-1]:.2f}")
+            st.write(f"總回報率: {total_return:.2f}%")
+            st.write(f"最大回報率: {max_return:.2f}%")
+            st.write(f"最小回報率: {min_return:.2f}%")
+            st.write(f"買入交易次數: {len(buy_signals)}")
+            st.write(f"賣出交易次數: {len(sell_signals)}")
             
             mae = mean_absolute_error(y_test, predictions)
             rmse = np.sqrt(mean_squared_error(y_test, predictions))
             r2 = r2_score(y_test, predictions)
             mape = np.mean(np.abs((y_test - predictions) / y_test)) * 100
             
-            st.subheader("Model Evaluation Metrics")
-            st.write(f"MAE: {mae:.4f}")
-            st.write(f"RMSE: {rmse:.4f}")
-            st.write(f"R²: {r2:.4f}")
-            st.write(f"MAPE: {mape:.2f}%")
+            st.subheader("模型評估指標")
+            st.write(f"平均絕對誤差 (MAE): {mae:.4f}")
+            st.write(f"均方根誤差 (RMSE): {rmse:.4f}")
+            st.write(f"決定係數 (R²): {r2:.4f}")
+            st.write(f"平均絕對百分比誤差 (MAPE): {mape:.2f}%")
 
 if __name__ == "__main__":
     main()

@@ -12,7 +12,7 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 import time
 from datetime import datetime, timedelta
 
-# 自訂 Attention 層（保持不變）
+# 自訂 Attention 層
 class Attention(Layer):
     def __init__(self, **kwargs):
         super(Attention, self).__init__(**kwargs)
@@ -36,7 +36,128 @@ class Attention(Layer):
     def compute_output_shape(self, input_shape):
         return (input_shape[0], input_shape[-1])
 
-# 其他函數保持不變（build_model, preprocess_data, predict_step, backtest）
+# 構建模型
+def build_model(input_shape):
+    inputs = Input(shape=input_shape)
+    x = Conv1D(filters=128, kernel_size=1, activation='relu', padding='same')(inputs)
+    x = Bidirectional(LSTM(units=128, activation='tanh', return_sequences=True))(x)
+    x = Dropout(0.01)(x)
+    x = Attention()(x)
+    outputs = Dense(1)(x)
+    model = tf.keras.Model(inputs=inputs, outputs=outputs)
+    model.compile(optimizer='adam', loss='mse', metrics=['mae'])
+    return model
+
+# 數據預處理
+def preprocess_data(data, timesteps):
+    data['Yesterday_Close'] = data['Close'].shift(1)
+    data['Average'] = (data['High'] + data['Low'] + data['Close']) / 3
+    data = data.dropna()
+
+    features = ['Yesterday_Close', 'Open', 'High', 'Low', 'Average']
+    target = 'Close'
+
+    scaler_features = MinMaxScaler()
+    scaler_target = MinMaxScaler()
+
+    scaled_features = scaler_features.fit_transform(data[features])
+    scaled_target = scaler_target.fit_transform(data[[target]])
+
+    data_index = pd.to_datetime(data.index)
+    st.write(f"數據範圍：{data_index[0]} 至 {data_index[-1]}，總共 {len(data_index)} 個交易日")
+
+    total_samples = len(scaled_features) - timesteps
+    train_size = int(total_samples * 0.7)
+    test_size = total_samples - train_size
+
+    st.write(f"總樣本數：{total_samples}，訓練樣本數：{train_size}，測試樣本數：{test_size}")
+
+    X, y = [], []
+    for i in range(total_samples):
+        X.append(scaled_features[i:i + timesteps])
+        y.append(scaled_target[i + timesteps])
+
+    X = np.array(X)
+    y = np.array(y)
+
+    X_train = X[:train_size]
+    y_train = y[:train_size]
+    X_test = X[train_size:]
+    y_test = y[train_size:]
+
+    test_dates = data_index[timesteps + train_size:timesteps + train_size + test_size]
+
+    st.write(f"X_train shape: {X_train.shape}, X_test shape: {X_test.shape}")
+    st.write(f"訓練數據範圍：{data_index[0]} 至 {data_index[train_size + timesteps - 1]}")
+    st.write(f"測試數據範圍：{data_index[train_size + timesteps]} 至 {data_index[-1]}")
+
+    return X_train, X_test, y_train, y_test, scaler_target, test_dates, data
+
+# 預測函數
+@tf.function(reduce_retracing=True)
+def predict_step(model, x):
+    st.write(f"X_test shape before prediction: {x.shape}")
+    return model(x, training=False)
+
+# 回測與交易策略
+def backtest(data, predictions, test_dates, period_start, period_end, initial_capital=100000):
+    data = data.copy()
+    test_size = len(predictions)
+    data['Predicted'] = np.nan
+    data.iloc[-test_size:, data.columns.get_loc('Predicted')] = predictions.flatten()
+
+    data['EMA12'] = data['Close'].ewm(span=12, adjust=False).mean()
+    data['EMA26'] = data['Close'].ewm(span=26, adjust=False).mean()
+    data['MACD'] = data['EMA12'] - data['EMA26']
+    data['Signal'] = data['MACD'].ewm(span=9, adjust=False).mean()
+
+    position = 0
+    capital = initial_capital
+    shares = 0
+    capital_values = []
+    buy_signals = []
+    sell_signals = []
+
+    test_dates = pd.to_datetime(test_dates)
+    period_start = pd.to_datetime(period_start)
+    period_end = pd.to_datetime(period_end)
+
+    mask = (test_dates >= period_start) & (test_dates <= period_end)
+    filtered_dates = test_dates[mask]
+
+    if len(filtered_dates) == 0:
+        st.error("回測時段不在測試數據範圍內！")
+        return None, None, None, None, None, None
+
+    test_start_idx = data.index.get_loc(filtered_dates[0])
+    test_end_idx = data.index.get_loc(filtered_dates[-1])
+
+    capital_values = [initial_capital] * test_start_idx
+
+    for i in range(test_start_idx, test_end_idx + 1):
+        close_price = data['Close'].iloc[i].item()
+        if data['MACD'].iloc[i] > data['Signal'].iloc[i] and data['MACD'].iloc[i - 1] <= data['Signal'].iloc[i - 1]:
+            if position == 0:
+                shares = capital // close_price
+                capital -= shares * close_price
+                position = 1
+                buy_signals.append((data.index[i], close_price))
+        elif data['MACD'].iloc[i] < data['Signal'].iloc[i] and data['MACD'].iloc[i - 1] >= data['Signal'].iloc[i - 1]:
+            if position == 1:
+                capital += shares * close_price
+                position = 0
+                shares = 0
+                sell_signals.append((data.index[i], close_price))
+
+        total_value = capital + (shares * close_price if position > 0 else 0)
+        capital_values.append(total_value)
+
+    capital_values = np.array(capital_values)
+    total_return = (capital_values[-1] / capital_values[0] - 1) * 100
+    max_return = (max(capital_values) / capital_values[0] - 1) * 100
+    min_return = (min(capital_values) / capital_values[0] - 1) * 100
+
+    return capital_values, total_return, max_return, min_return, buy_signals, sell_signals
 
 # 主程式
 def main():
@@ -55,7 +176,6 @@ def main():
     epochs = st.slider("選擇訓練次數（epochs）", min_value=50, max_value=200, value=200, step=50)
     st.markdown("**提示**：更高的訓練次數（epochs）可能提高模型準確度，但會增加訓練時間。")
 
-    # 生成回測時段選項（保持不變）
     current_date = datetime(2025, 3, 17)
     start_date = current_date - timedelta(days=1095)
     periods = []
@@ -78,7 +198,6 @@ def main():
         start_time = time.time()
 
         with st.spinner("正在下載數據並訓練模型，請等待..."):
-            # 數據下載和處理部分保持不變
             period_start_str, period_end_str = selected_period.split(" to ")
             period_start = datetime.strptime(period_start_str, "%Y-%m-%d")
             period_end = datetime.strptime(period_end_str, "%Y-%m-%d")
@@ -139,7 +258,6 @@ def main():
         filtered_y_test = y_test[mask]
         filtered_predictions = predictions[mask]
 
-        # 1. 股票價格預測圖表（調整大小）
         st.subheader(f"{stock_symbol} 分析結果（{selected_period}）")
         fig = go.Figure()
         fig.add_trace(go.Scatter(x=filtered_dates, y=filtered_y_test.flatten(), mode='lines', name='Actual Price'))
@@ -155,12 +273,11 @@ def main():
             xaxis_title='Date',
             yaxis_title='Price',
             legend_title='Legend',
-            height=600,  # 增加圖表高度
-            width=1000   # 增加圖表寬度
+            height=600,
+            width=1000
         )
         st.plotly_chart(fig, use_container_width=True)
 
-        # 2. MACD 分析圖表（調整大小）
         st.subheader("MACD 分析（回測期間）")
         data_backtest = full_data.loc[period_start:period_end].copy()
         data_backtest['EMA12'] = data_backtest['Close'].ewm(span=12, adjust=False).mean()
@@ -190,12 +307,11 @@ def main():
             xaxis_title='Date',
             yaxis_title='MACD Value',
             legend_title='Legend',
-            height=600,  # 增加圖表高度
-            width=1000   # 增加圖表寬度
+            height=600,
+            width=1000
         )
         st.plotly_chart(fig_macd, use_container_width=True)
 
-        # 3. 回測結果
         st.subheader("回測結果")
         st.write(f"初始資金: $100,000")
         st.write(f"最終資金: ${capital_values[-1]:.2f}")
@@ -205,7 +321,6 @@ def main():
         st.write(f"買入交易次數: {len(buy_signals)}")
         st.write(f"賣出交易次數: {len(sell_signals)}")
 
-        # 4. 模型評估指標（帶說明）
         st.subheader("模型評估指標")
         mae = mean_absolute_error(filtered_y_test, filtered_predictions)
         rmse = np.sqrt(mean_squared_error(filtered_y_test, filtered_predictions))
@@ -224,7 +339,6 @@ def main():
         st.write(f"平均絕對百分比誤差 (MAPE): {mape:.2f}%")
         st.markdown("*MAPE表示預測誤差的百分比，數值越小表示預測精度越高*")
 
-        # 運行時間
         st.subheader("運行時間")
         st.write(f"總耗時: {elapsed_time:.2f} 秒")
 

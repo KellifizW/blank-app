@@ -6,7 +6,7 @@ import tensorflow as tf
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Conv1D, Bidirectional, LSTM, Dense, Dropout, Layer, Input
 from tensorflow.keras import backend as K
-import matplotlib.pyplot as plt
+import plotly.graph_objects as go
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 import time
@@ -93,19 +93,6 @@ def preprocess_data(data, timesteps):
     st.write(f"訓練數據範圍：{data_index[0]} 至 {data_index[train_size + timesteps - 1]}")
     st.write(f"測試數據範圍：{data_index[train_size + timesteps]} 至 {data_index[-1]}")
 
-    # 顯示訓練數據（前 5 條記錄）
-    if len(X_train) > 0:
-        st.subheader("訓練數據記錄（前 5 條）")
-        train_records = []
-        for i in range(min(5, len(X_train))):
-            record = {
-                "日期": data_index[i + timesteps].strftime('%Y-%m-%d'),
-                "特徵 (X_train)": X_train[i].flatten()[:10],  # 展平並顯示前 10 個值
-                "目標 (y_train)": y_train[i][0]
-            }
-            train_records.append(record)
-        st.write(pd.DataFrame(train_records))
-
     return X_train, X_test, y_train, y_test, scaler_target, test_dates, data
 
 # 預測函數
@@ -191,9 +178,9 @@ def main():
     epochs = st.slider("選擇訓練次數（epochs）", min_value=50, max_value=200, value=200, step=50)
     st.markdown("**提示**：更高的訓練次數（epochs）可能提高模型準確度，但會增加訓練時間。")
 
-    # 生成回測時段選項（從 2020 年至今，每 6 個月一個時段）
+    # 生成回測時段選項（最近 3 年，每 6 個月一個時段）
     current_date = datetime(2025, 3, 17)  # 當前日期
-    start_date = datetime(2020, 1, 1)  # 開始日期
+    start_date = current_date - timedelta(days=1095)  # 3 年前，約 2022-03-18
     periods = []
     temp_end_date = current_date
 
@@ -208,7 +195,7 @@ def main():
         st.error("無法生成回測時段選項！請檢查日期範圍設置。")
         return
 
-    selected_period = st.selectbox("選擇回測時段（6個月）", periods[::-1])
+    selected_period = st.selectbox("選擇回測時段（6個月，最近 3 年）", periods[::-1])
 
     if st.button("運行分析"):
         start_time = time.time()
@@ -277,17 +264,6 @@ def main():
             history = model.fit(X_train, y_train, epochs=epochs, batch_size=256, validation_split=0.1, verbose=1)
             progress_bar.progress(60)
 
-            # 繪製訓練損失曲線
-            st.subheader("訓練損失曲線")
-            fig, ax = plt.subplots(figsize=(10, 6))
-            ax.plot(history.history['loss'], label='Training Loss')
-            ax.plot(history.history['val_loss'], label='Validation Loss')
-            ax.set_title('Training and Validation Loss')
-            ax.set_xlabel('Epoch')
-            ax.set_ylabel('Loss')
-            ax.legend()
-            st.pyplot(fig)
-
             # 進行預測
             status_text.text("步驟 4/5: 進行價格預測...")
             predictions = predict_step(model, X_test)
@@ -318,22 +294,19 @@ def main():
         filtered_y_test = y_test[mask]
         filtered_predictions = predictions[mask]
 
-        # 繪製圖表
+        # 創建可互動的價格預測圖表
         st.subheader(f"{stock_symbol} 分析結果（{selected_period}）")
-        fig, ax = plt.subplots(figsize=(10, 6))
-        ax.plot(filtered_dates, filtered_y_test, label='Actual Price')
-        ax.plot(filtered_dates, filtered_predictions, label='Predicted Price')
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=filtered_dates, y=filtered_y_test.flatten(), mode='lines', name='Actual Price'))
+        fig.add_trace(go.Scatter(x=filtered_dates, y=filtered_predictions.flatten(), mode='lines', name='Predicted Price'))
         buy_signals = [(d, p) for d, p in buy_signals if period_start <= d <= period_end]
         sell_signals = [(d, p) for d, p in sell_signals if period_start <= d <= period_end]
         buy_x, buy_y = zip(*buy_signals) if buy_signals else ([], [])
         sell_x, sell_y = zip(*sell_signals) if sell_signals else ([], [])
-        ax.scatter(buy_x, buy_y, color='green', label='Buy Signal', marker='^', s=100)
-        ax.scatter(sell_x, sell_y, color='red', label='Sell Signal', marker='v', s=100)
-        ax.set_title(f'{stock_symbol} Actual vs Predicted Prices ({selected_period})')
-        ax.set_xlabel('Date')
-        ax.set_ylabel('Price')
-        ax.legend()
-        st.pyplot(fig)
+        fig.add_trace(go.Scatter(x=buy_x, y=buy_y, mode='markers', name='Buy Signal', marker=dict(symbol='triangle-up', size=10, color='green')))
+        fig.add_trace(go.Scatter(x=sell_x, y=sell_y, mode='markers', name='Sell Signal', marker=dict(symbol='triangle-down', size=10, color='red')))
+        fig.update_layout(title=f'{stock_symbol} Actual vs Predicted Prices ({selected_period})', xaxis_title='Date', yaxis_title='Price', legend_title='Legend')
+        st.plotly_chart(fig)
 
         st.subheader("回測結果")
         st.write(f"初始資金: $100,000")
@@ -354,6 +327,35 @@ def main():
         st.write(f"均方根誤差 (RMSE): {rmse:.4f}")
         st.write(f"決定係數 (R²): {r2:.4f}")
         st.write(f"平均絕對百分比誤差 (MAPE): {mape:.2f}%")
+
+        # 創建 MACD 互動式圖表
+        st.subheader("MACD 分析（回測期間）")
+        data_backtest = full_data.loc[period_start:period_end].copy()
+        data_backtest['EMA12'] = data_backtest['Close'].ewm(span=12, adjust=False).mean()
+        data_backtest['EMA26'] = data_backtest['Close'].ewm(span=26, adjust=False).mean()
+        data_backtest['MACD'] = data_backtest['EMA12'] - data_backtest['EMA26']
+        data_backtest['Signal'] = data_backtest['MACD'].ewm(span=9, adjust=False).mean()
+
+        # 檢測金叉和死叉
+        golden_cross = []
+        death_cross = []
+        for i in range(1, len(data_backtest)):
+            if data_backtest['MACD'].iloc[i] > data_backtest['Signal'].iloc[i] and data_backtest['MACD'].iloc[i - 1] <= data_backtest['Signal'].iloc[i - 1]:
+                golden_cross.append((data_backtest.index[i], data_backtest['MACD'].iloc[i]))
+            elif data_backtest['MACD'].iloc[i] < data_backtest['Signal'].iloc[i] and data_backtest['MACD'].iloc[i - 1] >= data_backtest['Signal'].iloc[i - 1]:
+                death_cross.append((data_backtest.index[i], data_backtest['MACD'].iloc[i]))
+
+        golden_x, golden_y = zip(*golden_cross) if golden_cross else ([], [])
+        death_x, death_y = zip(*death_cross) if death_cross else ([], [])
+
+        fig_macd = go.Figure()
+        fig_macd.add_trace(go.Scatter(x=data_backtest.index, y=data_backtest['MACD'], mode='lines', name='MACD Line'))
+        fig_macd.add_trace(go.Scatter(x=data_backtest.index, y=data_backtest['Signal'], mode='lines', name='Signal Line'))
+        fig_macd.add_trace(go.Scatter(x=[data_backtest.index[0], data_backtest.index[-1]], y=[0, 0], mode='lines', name='Zero Line', line=dict(dash='dash')))
+        fig_macd.add_trace(go.Scatter(x=golden_x, y=golden_y, mode='markers', name='Golden Cross', marker=dict(symbol='circle', size=10, color='green')))
+        fig_macd.add_trace(go.Scatter(x=death_x, y=death_y, mode='markers', name='Death Cross', marker=dict(symbol='circle', size=10, color='red')))
+        fig_macd.update_layout(title=f'{stock_symbol} MACD Analysis ({selected_period})', xaxis_title='Date', yaxis_title='MACD Value', legend_title='Legend')
+        st.plotly_chart(fig_macd)
 
         st.subheader("運行時間")
         st.write(f"總耗時: {elapsed_time:.2f} 秒")
